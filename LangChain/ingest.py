@@ -1,6 +1,8 @@
 import os
+import hashlib
 from pathlib import Path
-
+import shutil
+from config import settings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -8,17 +10,12 @@ from langchain_chroma import Chroma
 
 
 
-# 配置参数
-
-DATA_PATH = Path(r"D:\Code\ML\ChronoRAG-ZH\data\modern_chinese_history.pdf")
-CHROMA_DIR = Path(r"D:\Code\ML\ChronoRAG-ZH\LangChain\chroma_db")
-
-EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
-COLLECTION_NAME = "chrono_rag"
-
-CHUNK_SIZE = 400
-CHUNK_OVERLAP = 80
-
+def get_file_hash(path: Path) -> str:
+    hasher = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 # 加载文档
@@ -38,8 +35,8 @@ def load_documents(path: Path):
 
 def split_documents(documents):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
         separators=["\n\n", "\n", "。", "；", "，", " "],
     )
 
@@ -60,17 +57,17 @@ def split_documents(documents):
 
 def build_vectorstore(chunks):
     embedding = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL
+        model_name=settings.embedding_model
     )
 
     vectordb = Chroma.from_documents(
         documents=chunks,
         embedding=embedding,
-        persist_directory=str(CHROMA_DIR),
-        collection_name=COLLECTION_NAME,
+        persist_directory=str(settings.chroma_dir),
+        collection_name=settings.collection_name,
     )
 
-    print(f"[INFO] 向量库已构建并自动持久化到: {CHROMA_DIR}")
+    print(f"[INFO] 向量库已构建并自动持久化到: {settings.chroma_dir}")
     return vectordb
 
 
@@ -78,17 +75,29 @@ def build_vectorstore(chunks):
 # 主程序
 
 def main():
-    if CHROMA_DIR.exists():
-        print(f"[WARN] ChromaDB 已存在于 {CHROMA_DIR}")
-        print("[WARN] 如需重新构建，请手动删除该目录")
-        return
+    current_hash = get_file_hash(settings.data_path)
+    hash_file = settings.chroma_dir / "source_hash.txt"
+    if settings.chroma_dir.exists():
+        if hash_file.exists():
+            with open(hash_file, "r") as f:
+                saved_hash = f.read().strip()
+            if saved_hash == current_hash:
+                print(f"[INFO] ChromaDB 已存在且数据未变更，跳过构建")
+                return
+        else:
+            print(f"[WARN] 未找到 hash 文件，将重新构建向量库")
+            shutil.rmtree(settings.chroma_dir)#删除旧数据库
+    else:
+        print("[WARN] 向量库存在但无版本记录，为安全起见将重建")
+        shutil.rmtree(settings.chroma_dir)
 
-    print("[INFO] 开始构建 ChronoRAG-ZH 向量知识库")
-
-    documents = load_documents(DATA_PATH)
+    documents = load_documents(settings.data_path)
     chunks = split_documents(documents)
     build_vectorstore(chunks)
-
+    #保存hash
+    settings.chroma_dir.mkdir(exist_ok=True)
+    with open(hash_file, "w") as f:
+        f.write(current_hash)
     print("[SUCCESS] Ingest 完成，RAG 数据层已就绪")
 
 

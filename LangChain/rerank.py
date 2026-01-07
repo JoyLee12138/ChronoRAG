@@ -1,17 +1,14 @@
 from typing import List
-
+from config import settings
 from langchain_core.documents import Document
 from sentence_transformers import CrossEncoder
 
 
-# ====================== 配置 ======================
-RERANK_MODEL = "BAAI/bge-reranker-base"
-DEFAULT_TOP_N = 5
 
 
 # ====================== 初始化（全局单例） ======================
 _reranker = CrossEncoder(
-    RERANK_MODEL,
+    settings.rerank_model,
     max_length=512,
 )
 
@@ -20,7 +17,7 @@ _reranker = CrossEncoder(
 def rerank_documents(
     query: str,
     documents: List[Document],
-    top_n: int = DEFAULT_TOP_N,
+    top_n: int = settings.top_n,
 ) -> List[Document]:
     if not documents:
         return []
@@ -33,6 +30,8 @@ def rerank_documents(
 
     reranked_docs = [doc for doc, _ in scored_docs[:top_n]]
     return reranked_docs
+
+
 
 
 # ====================== 本地调试 ======================
